@@ -1,7 +1,7 @@
 import socket
 import threading
 
-SERVER_HOST = "10.0.2.15"   # IP Ubuntu
+SERVER_HOST = "10.0.2.15"
 SERVER_PORT = 5000
 STOP_MESSAGE = "[STOP]"
 
@@ -22,11 +22,9 @@ def receive_messages(sock: socket.socket, stop_event: threading.Event) -> None:
                 print("Сервер завершил соединение.")
                 stop_event.set()
                 break
-        except ConnectionResetError:
+
+        except (ConnectionResetError, OSError):
             print("\nСоединение было принудительно закрыто сервером.")
-            stop_event.set()
-            break
-        except OSError:
             stop_event.set()
             break
 
@@ -45,19 +43,25 @@ def main() -> None:
         )
         receiver.start()
 
-        while not stop_event.is_set():
-            try:
-                message = input("Вы: ")
+        try:
+            while not stop_event.is_set():
+                try:
+                    message = input("Вы: ")
+                except KeyboardInterrupt:
+                    print("\nКлиент остановлен вручную.")
+                    stop_event.set()
+                    break
+
                 client.sendall(message.encode("utf-8"))
 
                 if message.strip() == STOP_MESSAGE:
                     print("Вы завершили соединение.")
                     stop_event.set()
                     break
-            except (BrokenPipeError, ConnectionResetError, OSError):
-                print("\nНе удалось отправить сообщение. Соединение закрыто.")
-                stop_event.set()
-                break
+
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            print("\nНе удалось отправить сообщение. Соединение закрыто.")
+            stop_event.set()
 
     print("Клиент завершил работу.")
 
