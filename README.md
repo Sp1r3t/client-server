@@ -15,7 +15,9 @@
 ### 1. Запуск сервера
 ```bash
 python server.py
+```
 
 ### 2. Запуск сервера
 ```bash
 python client.py
+```
