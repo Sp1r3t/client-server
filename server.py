@@ -10,6 +10,7 @@ def receive_messages(conn: socket.socket, stop_event: threading.Event) -> None:
     while not stop_event.is_set():
         try:
             data = conn.recv(1024)
+
             if not data:
                 print("\nКлиент отключился.")
                 stop_event.set()
@@ -32,14 +33,17 @@ def receive_messages(conn: socket.socket, stop_event: threading.Event) -> None:
 def main() -> None:
     stop_event = threading.Event()
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((HOST, PORT))
-        server.listen(1)
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server.bind((HOST, PORT))
+    server.listen(1)
 
-        print(f"Сервер запущен на {HOST}:{PORT}")
-        print("Ожидание подключения клиента...")
+    print(f"Сервер запущен на {HOST}:{PORT}")
+    print("Ожидание подключения клиента...")
 
+    conn = None
+
+    try:
         conn, addr = server.accept()
         print(f"Подключён клиент: {addr}")
 
@@ -50,33 +54,42 @@ def main() -> None:
         )
         receiver.start()
 
-        try:
-            while not stop_event.is_set():
-                try:
-                    message = input("Вы: ")
-                except EOFError:
-                    print("\nВвод на сервере недоступен. Завершение.")
-                    stop_event.set()
-                    break
-                except KeyboardInterrupt:
-                    print("\nСервер остановлен вручную.")
-                    stop_event.set()
-                    break
+        while not stop_event.is_set():
+            try:
+                message = input("Вы: ")
+            except KeyboardInterrupt:
+                print("\nСервер остановлен вручную.")
+                stop_event.set()
+                break
+            except EOFError:
+                print("\nВвод недоступен. Сервер завершает работу.")
+                stop_event.set()
+                break
 
+            try:
                 conn.sendall(message.encode("utf-8"))
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                print("\nНе удалось отправить сообщение. Соединение закрыто.")
+                stop_event.set()
+                break
 
-                if message.strip() == STOP_MESSAGE:
-                    print("Вы завершили соединение.")
-                    stop_event.set()
-                    break
+            if message.strip() == STOP_MESSAGE:
+                print("Вы завершили соединение.")
+                stop_event.set()
+                break
 
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            print("\nНе удалось отправить сообщение. Соединение закрыто.")
-            stop_event.set()
-        finally:
+    finally:
+        stop_event.set()
+
+        if conn is not None:
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             conn.close()
 
-    print("Сервер завершил работу с клиентом.")
+        server.close()
+        print("Сервер завершил работу.")
 
 
 if __name__ == "__main__":
