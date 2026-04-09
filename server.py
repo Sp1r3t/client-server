@@ -6,50 +6,34 @@ PORT = 5000
 STOP_MESSAGE = "[STOP]"
 
 
-def receive_messages(conn: socket.socket) -> None:
-    try:
-        while True:
+def receive_messages(conn: socket.socket, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        try:
             data = conn.recv(1024)
             if not data:
                 print("\nКлиент отключился.")
+                stop_event.set()
                 break
 
-            message = data.decode("utf-8").strip()
+            message = data.decode("utf-8")
             print(f"\nКлиент: {message}")
 
-            if message == STOP_MESSAGE:
-                print("Получена команда остановки. Соединение закрывается.")
+            if message.strip() == STOP_MESSAGE:
+                print("Клиент завершил соединение.")
+                stop_event.set()
                 break
-    except ConnectionResetError:
-        print("\nСоединение было принудительно закрыто клиентом.")
-    finally:
-        try:
-            conn.shutdown(socket.SHUT_RDWR)
+        except ConnectionResetError:
+            print("\nСоединение было закрыто клиентом.")
+            stop_event.set()
+            break
         except OSError:
-            pass
-        conn.close()
-
-
-def send_messages(conn: socket.socket) -> None:
-    try:
-        while True:
-            message = input("Вы: ").strip()
-            conn.sendall(message.encode("utf-8"))
-
-            if message == STOP_MESSAGE:
-                print("Вы завершили соединение.")
-                break
-    except (BrokenPipeError, OSError):
-        print("\nНе удалось отправить сообщение: соединение уже закрыто.")
-    finally:
-        try:
-            conn.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        conn.close()
+            stop_event.set()
+            break
 
 
 def main() -> None:
+    stop_event = threading.Event()
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.bind((HOST, PORT))
         server.listen(1)
@@ -60,10 +44,29 @@ def main() -> None:
         conn, addr = server.accept()
         print(f"Подключён клиент: {addr}")
 
-        receiver = threading.Thread(target=receive_messages, args=(conn,), daemon=True)
-        receiver.start()
+        with conn:
+            receiver = threading.Thread(
+                target=receive_messages,
+                args=(conn, stop_event),
+                daemon=True
+            )
+            receiver.start()
 
-        send_messages(conn)
+            while not stop_event.is_set():
+                try:
+                    message = input("Вы: ")
+                    conn.sendall(message.encode("utf-8"))
+
+                    if message.strip() == STOP_MESSAGE:
+                        print("Вы завершили соединение.")
+                        stop_event.set()
+                        break
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    print("\nНе удалось отправить сообщение. Соединение закрыто.")
+                    stop_event.set()
+                    break
+
+        print("Сервер завершил работу с клиентом.")
 
 
 if __name__ == "__main__":

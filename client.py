@@ -1,63 +1,65 @@
 import socket
 import threading
 
-SERVER_HOST = "127.0.0.1"  # Укажи IP сервера, если клиент на другом компьютере
+SERVER_HOST = "10.0.2.15"   # IP Ubuntu
 SERVER_PORT = 5000
 STOP_MESSAGE = "[STOP]"
 
 
-def receive_messages(sock: socket.socket) -> None:
-    try:
-        while True:
+def receive_messages(sock: socket.socket, stop_event: threading.Event) -> None:
+    while not stop_event.is_set():
+        try:
             data = sock.recv(1024)
             if not data:
                 print("\nСервер отключился.")
+                stop_event.set()
                 break
 
-            message = data.decode("utf-8").strip()
+            message = data.decode("utf-8")
             print(f"\nСервер: {message}")
 
-            if message == STOP_MESSAGE:
-                print("Получена команда остановки. Соединение закрывается.")
+            if message.strip() == STOP_MESSAGE:
+                print("Сервер завершил соединение.")
+                stop_event.set()
                 break
-    except ConnectionResetError:
-        print("\nСоединение было принудительно закрыто сервером.")
-    finally:
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
+        except ConnectionResetError:
+            print("\nСоединение было принудительно закрыто сервером.")
+            stop_event.set()
+            break
         except OSError:
-            pass
-        sock.close()
-
-
-def send_messages(sock: socket.socket) -> None:
-    try:
-        while True:
-            message = input("Вы: ").strip()
-            sock.sendall(message.encode("utf-8"))
-
-            if message == STOP_MESSAGE:
-                print("Вы завершили соединение.")
-                break
-    except (BrokenPipeError, OSError):
-        print("\nНе удалось отправить сообщение: соединение уже закрыто.")
-    finally:
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        sock.close()
+            stop_event.set()
+            break
 
 
 def main() -> None:
+    stop_event = threading.Event()
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client:
         client.connect((SERVER_HOST, SERVER_PORT))
         print(f"Подключено к серверу {SERVER_HOST}:{SERVER_PORT}")
 
-        receiver = threading.Thread(target=receive_messages, args=(client,), daemon=True)
+        receiver = threading.Thread(
+            target=receive_messages,
+            args=(client, stop_event),
+            daemon=True
+        )
         receiver.start()
 
-        send_messages(client)
+        while not stop_event.is_set():
+            try:
+                message = input("Вы: ")
+                client.sendall(message.encode("utf-8"))
+
+                if message.strip() == STOP_MESSAGE:
+                    print("Вы завершили соединение.")
+                    stop_event.set()
+                    break
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                print("\nНе удалось отправить сообщение. Соединение закрыто.")
+                stop_event.set()
+                break
+
+    print("Клиент завершил работу.")
 
 
 if __name__ == "__main__":
